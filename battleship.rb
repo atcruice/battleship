@@ -166,7 +166,7 @@ class Ship
 end
 
 # Simple class to represent a coordinate point on the
-# BattleshipBoard and, optionally, it's owner
+# BattleshipBoard and it's owner
 # (if the Coord belongs to a Ship)
 class Coord
   attr_reader :x, :y, :owner
