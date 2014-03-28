@@ -2,6 +2,8 @@
 # (think the classic Milton Bradley board game).
 #
 # State is derived from a list of ships occupying coordinates on the board.
+# Default board size: 10 x 10
+# Minimum board size: 5 x 5 (restricted by biggest ship)
 #
 # @author Alex Cruice
 # @version 20140329
@@ -11,8 +13,9 @@ class BattleshipBoard
 
   def initialize(w = 10, h = 10)
     # board dimension "constants"
-    @width = w.abs
-    @height = h.abs
+    biggest_ship = Ship.class_variable_get(:@@ship_types).values.max
+    @width = [w.abs, biggest_ship].max
+    @height = [h.abs, biggest_ship].max
     @width.freeze
     @height.freeze
 
@@ -28,7 +31,7 @@ class BattleshipBoard
   def place_ship(ship, loc, horiz)
     if ship.class == Ship &&
        loc.class == Coord &&
-       horiz.class == (TrueClass || FalseClass)
+       (horiz.class == TrueClass || horiz.class == FalseClass)
 
       potential_occupied = []
 
@@ -37,11 +40,11 @@ class BattleshipBoard
       # axis that changes
       potential_delta_lower = horiz ? loc.x : loc.y
       delta_upper = (horiz ? @width : @height) - ship.size
-      delta_lower = min(max(0, potential_delta_lower), delta_upper)
+      delta_lower = [[0, potential_delta_lower].max, delta_upper].min
       # axis that doesn't change
       potential_const_lower = horiz ? loc.y : loc.x
       const_upper = (horiz ? @height : @width) - ship.size
-      const = min(max(0, potential_const_lower), const_upper)
+      const = [[0, potential_const_lower].max, const_upper].min
       # build potential coords
       (delta_lower...delta_lower + ship.size).each do |n|
         x = horiz ? n : const
@@ -55,12 +58,15 @@ class BattleshipBoard
         # populate ship coords, update board
         ship.occupied_coords = potential_occupied
         @ships.push(ship)
+        # puts 'SALL GOOD'
         true # placement successful
       else
         # non-empty set intersection, overlap!
+        # puts 'OVERLAP'
         false # invalid placement
       end
     else
+      # puts 'BAD PARAM'
       false # placement failed, invalid params
     end
   end
@@ -78,23 +84,28 @@ class BattleshipBoard
   def attack(loc)
     if loc.class == Coord
       # sanitise values
-      loc = Coord.new(min(max(0, loc.x), @width), min(max(0, loc.y), @height))
+      loc = Coord.new([[0, loc.x].max, @width].min, [[0, loc.y].max, @height].min)
       # set intersection with all occupied Coords
       # loc MUST be on the RHS of the following expression
       # need to retain ownership of possible hit Coord for sink test
-      intersection = board_occupied & loc
+      intersection = board_occupied & [loc]
       if intersection.length == 0
         # empty set, MISS!
+        puts 'miss'
         false
       else
         # non-empty intersection, HIT!
+        # update Coord
+        puts 'hit'
         intersection[0].hit = true
 
-        # TODO: handle sunk-ness better than just printing
-        puts "Destroyed #{intersection[0].type}" if ObjectSpace._id2ref(intersection[0].owner).sunk?
+        # TODO: do something more with sunk-ness?
+        hit_ship = ObjectSpace._id2ref(intersection[0].owner)
+        puts "Destroyed #{hit_ship.type}" if hit_ship.sunk?
         true
       end
     else
+      # puts 'BAD PARAM'
       false # invalid param
     end
   end
@@ -114,14 +125,17 @@ class BattleshipBoard
   end
 end
 
-# class to represent ship types
+# Class to represent ship types.
+#
+# Defaults to Carrier.
+#
 # size: size/length of ship type
 # occupied_coords: list of board Coords occupied by this Ship,
 #                  only populated when valid
 # type: pretty string e.g.: "Battleship"
 class Ship
-  attr_accessor :size, :occupied_coords
-  attr_reader :type
+  attr_accessor :occupied_coords
+  attr_reader :type, :size
 
   @@ship_types = { carrier:    5,
                    battleship: 4,
@@ -130,20 +144,24 @@ class Ship
                    patrol:     2 }
   @@ship_types.freeze
 
-  def initialize(type)
-    unless @@ship_types[type].nil?
-      @size = @@ship_types[type]
-      @type = type.to_s.capitalize
-    end
+  def initialize(type = :carrier)
+    type = :carrier if @@ship_types[type].nil?
+    @size = @@ship_types[type]
+    @type = type.to_s.capitalize
+    @occupied_coords = []
   end
 
   # Determine if all Coords of this are hit
   def sunk?
-    outcome = true
-    occupied_coords.each do |c|
-      outcome &= c.hit
+    if occupied_coords == []
+      return false
+    else
+      outcome = true
+      occupied_coords.each do |c|
+        outcome &= c.hit
+      end
+      outcome
     end
-    outcome
   end
 end
 
@@ -154,12 +172,16 @@ class Coord
   attr_reader :x, :y, :owner
   attr_accessor :hit
 
-  def initialize(x = -1, y = -1, hit = false, *owner)
-    @x, @y, @hit, @owner = x, y, false, owner
+  def initialize(x = -1, y = -1, hit = false, owner = nil)
+    @x, @y, @hit, @owner = x, y, hit, owner
   end
 
   # Coord equality ignores hit-ness and ownership
-  def eql?(other_coord)
-    @x == other_coord.x && @y == other_coord.y
+  def hash
+    [@x, @y].hash
+  end
+
+  def eql?(other)
+    @x == other.x && @y == other.y
   end
 end
